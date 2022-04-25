@@ -208,7 +208,18 @@ task 'docker:test' do
         @good &&= run_or_fail 'yarn install'
 
         unless ENV["SKIP_CORE"]
-          @good &&= run_or_fail("cd app/assets/javascripts/discourse && CI=1 yarn ember exam --random")
+          if ENV["USER_EMBER_CLI_PARTITIONS"]
+            `mkdir tmp/test_data/ember`
+            Dir.chdir("#{Rails.root}/app/assets/javascripts/discourse") do # rubocop:disable Discourse/NoChdir
+              `yarn ember build --environment=test  -o /tmp/test_data/ember/build`
+              @good &&= run_or_fail("CI=1 yarn ember exam --path /tmp/test_data/ember/build --split=3 --partition=1 --random")
+              @good &&= run_or_fail("CI=1 yarn ember exam --path /tmp/test_data/ember/build --split=3 --partition=2 --random")
+              @good &&= run_or_fail("CI=1 yarn ember exam --path /tmp/test_data/ember/build --split=3 --partition=3 --random")
+            end
+          else
+            @good &&= run_or_fail("cd app/assets/javascripts/discourse && CI=1 yarn ember exam --random")
+          end
+
           @good &&= run_or_fail("QUNIT_EMBER_CLI=0 bundle exec rake qunit:test['#{js_timeout}','/wizard/qunit']")
         end
 
