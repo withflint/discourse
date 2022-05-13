@@ -14,6 +14,14 @@ RSpec.describe ExternalUploadManager do
   let!(:external_upload_stub) { Fabricate(:image_external_upload_stub, created_by: user) }
   let(:upload_base_url) { "https://#{SiteSetting.s3_upload_bucket}.s3.#{SiteSetting.s3_region}.amazonaws.com" }
 
+  let(:backup_path) { "#{RailsMultisite::ConnectionManagement.current_db}/backup_since_v1.6.tar.gz" }
+  let(:png_upload_path) do
+    upload_png = Fabricate(:upload, sha1: "bc975735dfc6409c1c2aa5ebf2239949bcbdbd65", original_filename: "test.png", extension: "png")
+    upload_path = Discourse.store.get_path_for_upload(upload_png)
+    upload_png.destroy!
+    upload_path
+  end
+
   subject do
     ExternalUploadManager.new(external_upload_stub)
   end
@@ -76,15 +84,8 @@ RSpec.describe ExternalUploadManager do
 
       context "when the upload does not get changed in UploadCreator (resized etc.)" do
         it "copies the stubbed upload on S3 to its new destination and deletes it" do
-          upload = subject.transform!
-          expect(WebMock).to have_requested(
-            :put,
-            "#{upload_base_url}/#{Discourse.store.get_path_for_upload(upload)}",
-          ).with(headers: { 'X-Amz-Copy-Source' => "#{SiteSetting.s3_upload_bucket}/#{external_upload_stub.key}" })
-          expect(WebMock).to have_requested(
-            :delete,
-            "#{upload_base_url}/#{external_upload_stub.key}"
-          )
+          expect_copy_and_delete(png_upload_path)
+          subject.transform!
         end
 
         it "errors if the image upload is too big" do
@@ -108,14 +109,9 @@ RSpec.describe ExternalUploadManager do
         let(:file) { file_from_fixtures("should_be_jpeg.heic", "images") }
 
         it "creates a new upload in s3 (not copy) and deletes the original stubbed upload" do
-          upload = subject.transform!
-          expect(WebMock).to have_requested(
-            :put,
-            "#{upload_base_url}/#{Discourse.store.get_path_for_upload(upload)}",
-          )
-          expect(WebMock).to have_requested(
-            :delete, "#{upload_base_url}/#{external_upload_stub.key}"
-          )
+          expect_copy_and_delete(png_upload_path)
+
+          subject.transform!
         end
       end
 
@@ -235,6 +231,8 @@ RSpec.describe ExternalUploadManager do
 
       it "does not try and download the file" do
         FileHelper.expects(:download).never
+        expect_copy_and_delete(backup_path)
+
         subject.transform!
       end
 
@@ -249,18 +247,13 @@ RSpec.describe ExternalUploadManager do
       end
 
       it "does not create an upload record" do
+        expect_copy_and_delete(backup_path)
         expect { subject.transform! }.not_to change { Upload.count }
       end
 
       it "copies the stubbed upload on S3 to its new destination and deletes it" do
-        upload = subject.transform!
-        expect(WebMock).to have_requested(
-          :put,
-          "#{upload_base_url}/#{RailsMultisite::ConnectionManagement.current_db}/backup_since_v1.6.tar.gz",
-        ).with(headers: { 'X-Amz-Copy-Source' => "#{SiteSetting.s3_backup_bucket}/#{external_upload_stub.key}" })
-        expect(WebMock).to have_requested(
-          :delete, "#{upload_base_url}/#{external_upload_stub.key}"
-        )
+        expect_copy_and_delete(backup_path)
+        subject.transform!
       end
     end
   end
@@ -291,12 +284,12 @@ RSpec.describe ExternalUploadManager do
 
   def copy_object_result
     <<~XML
-    <?xml version=\"1.0\" encoding=\"UTF-8\"?>\n
-    <CopyObjectResult
-      xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">
-      <LastModified>2021-07-19T04:10:41.000Z</LastModified>
-      <ETag>&quot;#{etag}&quot;</ETag>
-    </CopyObjectResult>
+      <?xml version=\"1.0\" encoding=\"UTF-8\"?>\n
+      <CopyObjectResult
+        xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">
+        <LastModified>2021-07-19T04:10:41.000Z</LastModified>
+        <ETag>&quot;#{etag}&quot;</ETag>
+      </CopyObjectResult>
     XML
   end
 
@@ -305,26 +298,37 @@ RSpec.describe ExternalUploadManager do
     upload_path = Discourse.store.get_path_for_upload(upload_pdf)
     upload_pdf.destroy!
 
-    stub_request(
-      :put,
-      "#{upload_base_url}/#{upload_path}"
-    ).to_return(
-      status: 200,
-      headers: { "ETag" => etag },
-      body: copy_object_result
-    )
+    # stub_request(
+    #   :put,
+    #   "#{upload_base_url}/#{upload_path}"
+    # ).to_return(
+    #   status: 200,
+    #   headers: { "ETag" => etag },
+    #   body: copy_object_result
+    # )
 
     upload_png = Fabricate(:upload, sha1: "bc975735dfc6409c1c2aa5ebf2239949bcbdbd65", original_filename: "test.png", extension: "png")
     upload_path = Discourse.store.get_path_for_upload(upload_png)
     upload_png.destroy!
-    stub_request(
-      :put,
-      "#{upload_base_url}/#{upload_path}"
-    ).to_return(
-      status: 200,
-      headers: { "ETag" => etag },
-      body: copy_object_result
-    )
+    # stub_request(
+    #   :put,
+    #   "#{upload_base_url}/#{upload_path}"
+    # ).to_return(
+    #   status: 200,
+    #   headers: { "ETag" => etag },
+    #   body: copy_object_result
+    # )
+  end
+
+  def expect_copy_and_delete(path)
+    S3Helper
+      .any_instance.expects(:copy)
+      .with(external_upload_stub.key, path, anything)
+      .returns([path, etag])
+
+    S3Helper
+      .any_instance.expects(:delete_object)
+      .with(external_upload_stub.key)
   end
 
   def stub_delete_object
