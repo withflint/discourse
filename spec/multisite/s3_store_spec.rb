@@ -104,15 +104,16 @@ RSpec.describe 'Multisite s3 uploads', type: :multisite do
       let(:s3_bucket) { resource.bucket(SiteSetting.s3_upload_bucket) }
       let(:s3_helper) { store.s3_helper }
 
+      let(:upload) { build_upload }
+
       it "removes the file from s3 on multisite" do
         test_multisite_connection('default') do
-          upload = build_upload
           s3_helper.expects(:s3_bucket).returns(s3_bucket).at_least_once
+          s3_helper.expects(:copy).with("original/1X/#{upload.sha1}.png", "uploads/tombstone/default/original/1X/#{upload.sha1}.png")
+
           upload.update!(url: "//s3-upload-bucket.s3.dualstack.us-west-1.amazonaws.com/#{upload_path}/original/1X/#{upload.sha1}.png")
           s3_object = stub
 
-          s3_bucket.expects(:object).with("uploads/tombstone/default/original/1X/#{upload.sha1}.png").returns(s3_object)
-          expect_copy_from(s3_object, "s3-upload-bucket/#{upload_path}/original/1X/#{upload.sha1}.png")
           s3_bucket.expects(:object).with("#{upload_path}/original/1X/#{upload.sha1}.png").returns(s3_object)
           s3_object.expects(:delete)
 
@@ -122,13 +123,12 @@ RSpec.describe 'Multisite s3 uploads', type: :multisite do
 
       it "removes the file from s3 on another multisite db" do
         test_multisite_connection('second') do
-          upload = build_upload
           s3_helper.expects(:s3_bucket).returns(s3_bucket).at_least_once
+          s3_helper.expects(:copy).with("original/1X/#{upload.sha1}.png", "uploads/tombstone/second/original/1X/#{upload.sha1}.png")
+
           upload.update!(url: "//s3-upload-bucket.s3.dualstack.us-west-1.amazonaws.com/#{upload_path}/original/1X/#{upload.sha1}.png")
           s3_object = stub
 
-          s3_bucket.expects(:object).with("uploads/tombstone/second/original/1X/#{upload.sha1}.png").returns(s3_object)
-          expect_copy_from(s3_object, "s3-upload-bucket/#{upload_path}/original/1X/#{upload.sha1}.png")
           s3_bucket.expects(:object).with("#{upload_path}/original/1X/#{upload.sha1}.png").returns(s3_object)
           s3_object.expects(:delete)
 
@@ -143,13 +143,12 @@ RSpec.describe 'Multisite s3 uploads', type: :multisite do
 
         it "removes the file from s3 on multisite" do
           test_multisite_connection('default') do
-            upload = build_upload
             s3_helper.expects(:s3_bucket).returns(s3_bucket).at_least_once
+            s3_helper.expects(:copy).with("discourse-uploads/original/1X/#{upload.sha1}.png", "discourse-uploads/uploads/tombstone/default/original/1X/#{upload.sha1}.png")
+
             upload.update!(url: "//s3-upload-bucket.s3.dualstack.us-west-1.amazonaws.com/discourse-uploads/#{upload_path}/original/1X/#{upload.sha1}.png")
             s3_object = stub
 
-            s3_bucket.expects(:object).with("discourse-uploads/uploads/tombstone/default/original/1X/#{upload.sha1}.png").returns(s3_object)
-            expect_copy_from(s3_object, "s3-upload-bucket/discourse-uploads/#{upload_path}/original/1X/#{upload.sha1}.png")
             s3_bucket.expects(:object).with("discourse-uploads/#{upload_path}/original/1X/#{upload.sha1}.png").returns(s3_object)
             s3_object.expects(:delete)
 
@@ -347,10 +346,14 @@ RSpec.describe 'Multisite s3 uploads', type: :multisite do
   end
 
   def expect_copy_from(s3_object, source)
-    s3_object.expects(:copy_from).with(
-      copy_source: source
-    ).returns(
+    source_object = Aws::S3::Object.new(bucket_name: "test-bucket", key: source, client: client)
+    source_object.stubs(:size).returns(5.megabytes)
+    s3_bucket.expects(:object).with(source).returns(source_object)
+
+    s3_object.expects(:copy_from).with(source_object, {}).returns(
       stub(copy_object_result: stub(etag: '"etagtest"'))
     )
+
+    source_object
   end
 end
