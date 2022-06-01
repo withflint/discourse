@@ -99,25 +99,23 @@ acceptance("User Status", function (needs) {
 
   test("emoji picking", async function (assert) {
     this.siteSettings.enable_user_status = true;
-
     const defaultStatusEmoji = "mega";
-    const emoji = "palm_tree";
 
     await visit("/");
     await openUserStatusModal();
 
     assert.ok(
-      exists(`.btn-emoji .d-icon-${defaultStatusEmoji}`),
+      exists(`.btn-emoji img.emoji[title=${defaultStatusEmoji}]`),
       "default status emoji is shown"
     );
 
     await click(".btn-emoji");
     assert.ok(exists(".emoji-picker.opened"), "emoji picker is opened");
 
-    await fillIn(".emoji-picker-content .filter", emoji);
+    await fillIn(".emoji-picker-content .filter", userStatusEmoji);
     await click(".results .emoji");
     assert.ok(
-      exists(`.btn-emoji .d-icon-${emoji}`),
+      exists(`.btn-emoji img.emoji[title=${userStatusEmoji}]`),
       "chosen status emoji is shown"
     );
   });
@@ -130,6 +128,10 @@ acceptance("User Status", function (needs) {
 
     await fillIn(".user-status-description", userStatus);
     await pickEmoji(userStatusEmoji);
+    assert.ok(
+      exists(`.btn-emoji img.emoji[title=${userStatusEmoji}]`),
+      "chosen status emoji is shown"
+    );
     await click(".btn-primary");
 
     assert.equal(
