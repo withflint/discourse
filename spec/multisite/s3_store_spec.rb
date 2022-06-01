@@ -99,60 +99,73 @@ RSpec.describe 'Multisite s3 uploads', type: :multisite do
 
     describe "#remove_upload" do
       let(:store) { FileStore::S3Store.new }
-      let(:client) { Aws::S3::Client.new(stub_responses: true) }
-      let(:resource) { Aws::S3::Resource.new(client: client) }
-      let(:s3_bucket) { resource.bucket(SiteSetting.s3_upload_bucket) }
-      let(:s3_helper) { store.s3_helper }
 
       let(:upload) { build_upload }
+      let(:upload_key) { "#{upload_path}/original/1X/#{upload.sha1}.png" }
+
+      def prepare_fake_s3
+        @fake_s3 = FakeS3.create
+        bucket = @fake_s3.bucket(SiteSetting.s3_upload_bucket)
+        bucket.put_object(
+          key: upload_key,
+          size: upload.filesize,
+          last_modified: upload.created_at
+        )
+        bucket
+      end
 
       it "removes the file from s3 on multisite" do
         test_multisite_connection('default') do
-          s3_helper.expects(:s3_bucket).returns(s3_bucket).at_least_once
-          s3_helper.expects(:copy).with("original/1X/#{upload.sha1}.png", "uploads/tombstone/default/original/1X/#{upload.sha1}.png")
-
           upload.update!(url: "//s3-upload-bucket.s3.dualstack.us-west-1.amazonaws.com/#{upload_path}/original/1X/#{upload.sha1}.png")
-          s3_object = stub
+          tombstone_key = "uploads/tombstone/default/original/1X/#{upload.sha1}.png"
+          bucket = prepare_fake_s3
 
-          s3_bucket.expects(:object).with("#{upload_path}/original/1X/#{upload.sha1}.png").returns(s3_object)
-          s3_object.expects(:delete)
+          expect(bucket.find_object(upload_key)).to be_present
+          expect(bucket.find_object(tombstone_key)).to be_nil
 
           store.remove_upload(upload)
+
+          expect(bucket.find_object(upload_key)).to be_nil
+          expect(bucket.find_object(tombstone_key)).to be_present
         end
       end
 
       it "removes the file from s3 on another multisite db" do
         test_multisite_connection('second') do
-          s3_helper.expects(:s3_bucket).returns(s3_bucket).at_least_once
-          s3_helper.expects(:copy).with("original/1X/#{upload.sha1}.png", "uploads/tombstone/second/original/1X/#{upload.sha1}.png")
-
           upload.update!(url: "//s3-upload-bucket.s3.dualstack.us-west-1.amazonaws.com/#{upload_path}/original/1X/#{upload.sha1}.png")
-          s3_object = stub
+          tombstone_key = "uploads/tombstone/second/original/1X/#{upload.sha1}.png"
+          bucket = prepare_fake_s3
 
-          s3_bucket.expects(:object).with("#{upload_path}/original/1X/#{upload.sha1}.png").returns(s3_object)
-          s3_object.expects(:delete)
+          expect(bucket.find_object(upload_key)).to be_present
+          expect(bucket.find_object(tombstone_key)).to be_nil
 
           store.remove_upload(upload)
+
+          expect(bucket.find_object(upload_key)).to be_nil
+          expect(bucket.find_object(tombstone_key)).to be_present
         end
       end
 
       describe "when s3_upload_bucket includes folders path" do
+        let(:upload_key) { "discourse-uploads/#{upload_path}/original/1X/#{upload.sha1}.png" }
+
         before do
           SiteSetting.s3_upload_bucket = "s3-upload-bucket/discourse-uploads"
         end
 
         it "removes the file from s3 on multisite" do
           test_multisite_connection('default') do
-            s3_helper.expects(:s3_bucket).returns(s3_bucket).at_least_once
-            s3_helper.expects(:copy).with("discourse-uploads/original/1X/#{upload.sha1}.png", "discourse-uploads/uploads/tombstone/default/original/1X/#{upload.sha1}.png")
-
             upload.update!(url: "//s3-upload-bucket.s3.dualstack.us-west-1.amazonaws.com/discourse-uploads/#{upload_path}/original/1X/#{upload.sha1}.png")
-            s3_object = stub
+            tombstone_key = "discourse-uploads/uploads/tombstone/default/original/1X/#{upload.sha1}.png"
+            bucket = prepare_fake_s3
 
-            s3_bucket.expects(:object).with("discourse-uploads/#{upload_path}/original/1X/#{upload.sha1}.png").returns(s3_object)
-            s3_object.expects(:delete)
+            expect(bucket.find_object(upload_key)).to be_present
+            expect(bucket.find_object(tombstone_key)).to be_nil
 
             store.remove_upload(upload)
+
+            expect(bucket.find_object(upload_key)).to be_nil
+            expect(bucket.find_object(tombstone_key)).to be_present
           end
         end
       end
@@ -343,17 +356,5 @@ RSpec.describe 'Multisite s3 uploads', type: :multisite do
         end
       end
     end
-  end
-
-  def expect_copy_from(s3_object, source)
-    source_object = Aws::S3::Object.new(bucket_name: "test-bucket", key: source, client: client)
-    source_object.stubs(:size).returns(5.megabytes)
-    s3_bucket.expects(:object).with(source).returns(source_object)
-
-    s3_object.expects(:copy_from).with(source_object, {}).returns(
-      stub(copy_object_result: stub(etag: '"etagtest"'))
-    )
-
-    source_object
   end
 end

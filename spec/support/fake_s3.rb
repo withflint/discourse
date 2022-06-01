@@ -20,6 +20,7 @@ class FakeS3
   end
 
   def bucket(bucket_name)
+    bucket_name, _prefix = bucket_name.split("/", 2)
     @buckets[bucket_name]
   end
 
@@ -28,7 +29,7 @@ class FakeS3
 
     s3_helper = S3Helper.new(
       full_bucket_name,
-      Rails.configuration.multisite ? FileStore::S3Store::multisite_tombstone_prefix : FileStore::S3Store::TOMBSTONE_PREFIX,
+      Rails.configuration.multisite ? FileStore::S3Store.new.multisite_tombstone_prefix : FileStore::S3Store::TOMBSTONE_PREFIX,
       client: @s3_client
     )
     @buckets[bucket_name] = FakeS3Bucket.new(full_bucket_name, s3_helper)
