@@ -1,5 +1,3 @@
-/* global andThen */
-
 import { TestModuleForComponent, render } from "@ember/test-helpers";
 import MessageBus from "message-bus-client";
 import EmberObject from "@ember/object";
@@ -166,18 +164,19 @@ export default function (name, opts) {
     }
 
     $.fn.autocomplete = function () {};
-    andThen(() => {
-      return LEGACY_ENV ? this.render(opts.template) : render(opts.template);
-    });
 
-    andThen(() => {
-      return opts.test.call(this, assert);
-    }).finally(async () => {
+    if (LEGACY_ENV) {
+      this.render(opts.template);
+    } else {
+      await render(opts.template);
+    }
+
+    try {
+      return await opts.test.call(this, assert);
+    } finally {
       if (opts.afterEach) {
-        await andThen(() => {
-          return opts.afterEach.call(opts);
-        });
+        opts.afterEach.call(opts);
       }
-    });
+    }
   });
 }
